@@ -2,3 +2,4 @@
 *.csv
 *.rar
 Archive/
+__pycache__/
