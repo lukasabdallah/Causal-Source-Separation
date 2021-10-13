@@ -19,7 +19,7 @@ def create_csv(path, cut_duration, overlap, keep_last):
 
     clean_file_set = os.listdir(clean_dir)
     clean_file_set = natsorted(clean_file_set)
-
+    # lost_samples_count = 0
     for file_name in clean_file_set:
         clean_path = os.path.join(clean_dir, file_name)
         noisy_path = os.path.join(noisy_dir, file_name)
@@ -31,8 +31,11 @@ def create_csv(path, cut_duration, overlap, keep_last):
         assert sr_reverberant == sr_noisy == sr_clean == 16000
         assert len(noisy_data) == len(clean_data) == len(reverberant_data)
         len_data = len(clean_data)
-        if len_data < cut_duration:       # ideally padding
-            continue
+        # if len_data < cut_duration:
+        #     lost_samples_count += 1
+        #     print(lost_samples_count)       # ideally padding
+        #     continue
+
         split_num = len_data // int(cut_duration * (1 - overlap))
         for i in range(split_num - 1):
             start = int(i * (cut_duration * (1 - overlap)))

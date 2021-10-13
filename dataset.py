@@ -35,7 +35,7 @@ class DemandDataset(torch.utils.data.Dataset):
         noisy_ds = noisy_ds[:, start: end]
 
         if self.transformation == 'real':
-            batch = transform(clean_ds, noisy_ds, self.threshold)
+            batch = transform(clean_ds, noisy_ds, noise_type, self.threshold)
             if self.name:
                 return batch, length, file_name
             else:
@@ -44,7 +44,7 @@ class DemandDataset(torch.utils.data.Dataset):
             return clean_ds, noisy_ds
 
 
-def transform(target_audio, noisy_audio, threshold, n_fft=511, hop_len=63, size=(256, 256)):
+def transform(target_audio, noisy_audio, noise_type, threshold, n_fft=511, hop_len=63, size=(256, 256)):
     target_audio = torch.squeeze(target_audio)
     noisy_audio = torch.squeeze(noisy_audio)
 
@@ -74,6 +74,7 @@ def transform(target_audio, noisy_audio, threshold, n_fft=511, hop_len=63, size=
     noisy_audio_stft_mag = scale_mag(noisy_audio_stft_mag, size, threshold)
     noisy_audio_stft_mag = normalise_spect(noisy_audio_stft_mag)
 
+    # stft with normalized mag
     noisy_audio_stft = conv_complex_after_stft(
         noisy_audio_stft_mag, noisy_audio_stft_phase, False)
     target_audio_stft = conv_complex_after_stft(
@@ -87,7 +88,8 @@ def transform(target_audio, noisy_audio, threshold, n_fft=511, hop_len=63, size=
         target_audio, \
         noisy_audio, \
         target_audio_stft_mag, \
-        noisy_audio_stft_mag
+        noisy_audio_stft_mag, \
+        noise_type
 
 
 def seed_worker(worker_id):
@@ -130,16 +132,16 @@ if __name__ == '__main__':
 
         f = np.ogrid[0:8000:256j]
         t = np.ogrid[0:1:256j]
-
-        fig = plt.figure()
-        fig.add_subplot(211)
-        plt.pcolormesh(t, f, sample[4][0][0], shading='gouraud')
+        fig = plt.figure(figsize=[6.4, 6.8])
+        denoised = fig.add_subplot(211)
+        plt.pcolormesh(t, f, sample[4][1][0], shading='gouraud')
+        plt.ylabel('Frequency [Hz]')
+        noisy = fig.add_subplot(212, sharex=denoised)
+        plt.pcolormesh(t, f, sample[5][1][0], shading='gouraud')
         plt.ylabel('Frequency [Hz]')
         plt.xlabel('Time [sec]')
-        fig.add_subplot(212)
-        plt.pcolormesh(t, f, sample[5][0][0], shading='gouraud')
-        plt.ylabel('Frequency [Hz]')
-        plt.xlabel('Time [sec]')
+        denoised.title.set_text('clean')
+        noisy.title.set_text(sample[6][1])
         plt.show()
         # for noisy, clean in zip(complex_noisy, complex_clean):
         #     #phase = torch.sin(clean)

@@ -31,7 +31,8 @@ def seed_torch(seed=20):
 
 
 def scale_mag_new(s, a, b):
-    sRescale = (((b - a) * (s - torch.min(s))) / (torch.max(s) - torch.min(s) + 1e-12)) + a
+    sRescale = (((b - a) * (s - torch.min(s))) /
+                (torch.max(s) - torch.min(s) + 1e-12)) + a
     return sRescale
 
 
@@ -66,12 +67,14 @@ def normalize_tensor(s, minmax=False):
         # s = s - torch.mean(s)
         vec = torch.div(s, torch.max(torch.abs(s)))
     else:
-        vec = (2*s-torch.min(s)-torch.max(s)) / (torch.max(s) - torch.min(s) + 1e-12)
+        vec = (2*s-torch.min(s)-torch.max(s)) / \
+            (torch.max(s) - torch.min(s) + 1e-12)
     return vec
 
 
 def normalize_audio(s):
-    vec = (2 * s - torch.min(s) - torch.max(s)) / (torch.max(s) - torch.min(s) + 1e-12)
+    vec = (2 * s - torch.min(s) - torch.max(s)) / \
+        (torch.max(s) - torch.min(s) + 1e-12)
     return vec
 
 
@@ -85,22 +88,22 @@ def stft(x, n_fft, hop_length, win_length, window, center, onesided, return_comp
     elif window == 'hamm':
         window = torch.hamming_window(win_length)
     out = torch.stft(input=x, n_fft=n_fft, hop_length=hop_length, win_length=win_length,
-    window=window, normalized=True, center=center, onesided=onesided, return_complex=return_complex)
+                     window=window, normalized=True, center=center, onesided=onesided, return_complex=return_complex)
     return out
 
 
-def istft(x, n_fft, hop_length, win_length, window, length=None, center=True, onesided=True, return_complex=False):
+def istft(x, n_fft, hop_length, win_length, window, device, length=None, center=True, onesided=True, return_complex=False):
     if window == 'hann':
-        window = torch.hann_window(win_length).cuda()
+        window = torch.hann_window(win_length).to(device)
     elif window == 'hamm':
-        window = torch.hamming_window(win_length).cuda()
+        window = torch.hamming_window(win_length).to(device)
     out = torch.istft(input=x, n_fft=n_fft, hop_length=hop_length, win_length=win_length,
-    window=window, center=center, normalized=True, onesided=onesided, length=length, return_complex=return_complex)
+                      window=window, center=center, normalized=True, onesided=onesided, length=length, return_complex=return_complex)
 
     return out
 
 
-def calculate_loss(outputs, target_to_check, input_phase, threshold, minmax=False):
+def calculate_loss(outputs, target_to_check, input_phase, threshold, device, minmax=False):
     ISTFT_loss_final = 0.0
     batch_size = outputs.size()[0]
     validation_output = []
@@ -108,14 +111,19 @@ def calculate_loss(outputs, target_to_check, input_phase, threshold, minmax=Fals
     output_for_ISTFT = scale_mag_new(outputs, threshold, 0)
     output_for_ISTFT = torch.pow(10, torch.div(output_for_ISTFT, 20))
     input_phase = input_phase.detach()
-    input_phase_to_save = torch.atan2(input_phase[:,1,:,:], input_phase[:,0,:,:])
-    new_signal_for_istft = conv_complex_after_stft(output_for_ISTFT.squeeze(1), input_phase_to_save.squeeze(1))
+    input_phase_to_save = torch.atan2(
+        input_phase[:, 1, :, :], input_phase[:, 0, :, :])
+    new_signal_for_istft = conv_complex_after_stft(
+        output_for_ISTFT.squeeze(1), input_phase_to_save.squeeze(1))
     for i in range(batch_size):
-        new_signal_after_istft_final = istft(new_signal_for_istft[i], 511, 64, 511, 'hamm', length=16384).squeeze()
+        new_signal_after_istft_final = istft(
+            new_signal_for_istft[i], 511, 64, 511, 'hamm', device, length=16128).squeeze()
         signal_to_check_final = target_to_check[i]
-        new_signal_after_istft_final = normalize_tensor(new_signal_after_istft_final, minmax)
+        new_signal_after_istft_final = normalize_tensor(
+            new_signal_after_istft_final, minmax)
         signal_to_check_final = normalize_tensor(signal_to_check_final, minmax)
-        ISTFT_loss = F.mse_loss(new_signal_after_istft_final, signal_to_check_final)
+        ISTFT_loss = F.mse_loss(
+            new_signal_after_istft_final, signal_to_check_final)
         ISTFT_loss_final = ISTFT_loss_final + torch.log(ISTFT_loss)
         assert len(new_signal_after_istft_final) == len(signal_to_check_final)
         validation_output.append(new_signal_after_istft_final.detach().cpu())
