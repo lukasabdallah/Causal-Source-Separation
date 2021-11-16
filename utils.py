@@ -7,6 +7,15 @@ import random
 import os
 
 
+def update_weights(model, path):
+    pre_trained_dict = torch.load(
+        path, map_location=lambda storage, loc: storage)
+    for layer in pre_trained_dict.keys():
+        model.state_dict()[layer].copy_(pre_trained_dict[layer])
+    for param in model.parameters():
+        param.requires_grad = True
+
+
 def weights_init_normal(m):
     if type(m) == nn.Conv2d:
         torch.nn.init.normal_(m.weight.data, 0.0, 0.02)

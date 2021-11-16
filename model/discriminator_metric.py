@@ -135,7 +135,9 @@ def test():
     preds = model(x, y)
     print(model)
     print(preds.shape)
-
+    preds_mean = torch.mean(preds, (2, 3))
+    # print(preds)
+    print(preds_mean.shape)
 
 
 if __name__ == "__main__":

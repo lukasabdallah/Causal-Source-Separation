@@ -4,7 +4,7 @@ import argparse
 class Parser():
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("--epochs", type=int, default=36,
+        self.parser.add_argument("--epochs", type=int, default=1,
                                  help="number of epochs of training")
 
         self.parser.add_argument("--data_dir", type=str, default='DEMAND_16KHz',
@@ -29,18 +29,24 @@ class Parser():
                                  help="metric_weight, mag_weight, istft_weight, phase_weight")
         self.parser.add_argument("--log_interval", type=int,
                                  default=1, help="log interval")
+        self.parser.add_argument("--log_dir", type=str,
+                                 default="./logs", help="log directory")
         self.parser.add_argument("--threshold", type=int,
-                                 default=-95, help="threshold")
+                                 default=-75, help="threshold")
         self.parser.add_argument("--mode", default='train',
                                  help="initialize, train or test mode")
-        self.parser.add_argument("--save_model", default='/no_backups/s1374/PMAGAN-1/saved2/',
+        self.parser.add_argument("--checkpt_dir", default='./checkpoints',
                                  help="the path to save model")
         self.parser.add_argument("--signal_minmax", default=False,
                                  help="use minmax normalization for 1d signal or not")
         self.parser.add_argument("--pesq_mode", default='own',
                                  help="use package pesq or our own pesq, 'pkg' or 'own'.")
-        self.parser.add_argument("--num_experts", default='2',
+        self.parser.add_argument("--num_experts", type=int, default='2',
                                  help="number of experts")
+        self.parser.add_argument("--name", type=str,
+                                 default='', help="experiment name")
+        self.parser.add_argument("--model_for_init_experts", type=str,
+                                 default='', help="name of expert models")
 
     def parse_args(self):
         return self.parser.parse_args()
