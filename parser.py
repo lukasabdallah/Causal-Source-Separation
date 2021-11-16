@@ -11,7 +11,7 @@ class Parser():
                                  help="name of the data_dir")
         self.parser.add_argument(
             "--csvfile", default='cut16128_ov0.5.csv', help="csv_file to use")
-        self.parser.add_argument("--batch_size", type=int, default=1,
+        self.parser.add_argument("--batch_size", type=int, default=2,
                                  help="size of the batches")
         self.parser.add_argument("--lr_G", type=float, default=0.0002,
                                  help="adam: generator learning rate")
@@ -32,7 +32,7 @@ class Parser():
         self.parser.add_argument("--log_dir", type=str,
                                  default="./logs", help="log directory")
         self.parser.add_argument("--threshold", type=int,
-                                 default=-75, help="threshold")
+                                 default=-80, help="threshold")
         self.parser.add_argument("--mode", default='train',
                                  help="initialize, train or test mode")
         self.parser.add_argument("--checkpt_dir", default='./checkpoints',
@@ -46,7 +46,7 @@ class Parser():
         self.parser.add_argument("--name", type=str,
                                  default='', help="experiment name")
         self.parser.add_argument("--model_for_init_experts", type=str,
-                                 default='', help="name of expert models")
+                                 default='n_exp_2_bs_4_lre_0.0002_lrd_0.0004_e_1_1634244820', help="name of expert models")
 
     def parse_args(self):
         return self.parser.parse_args()

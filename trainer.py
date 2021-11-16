@@ -9,9 +9,10 @@ import collections
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
 
-Model = collections.namedtuple("Model",
-                               'discrim_loss, discrim_loss_metric, gen_loss_GAN, gen_loss_L1, gen_loss,'
-                               'outputs, ISTFT_loss, input_to_check, perceptual_loss, val_output, val_target, phase_loss')
+#Model = collections.namedtuple("Model",
+#                               'discrim_loss, discrim_loss_metric, gen_loss_GAN, gen_loss_L1, gen_loss,'
+ #                              'outputs, ISTFT_loss, input_to_check, perceptual_loss, val_output, val_target, phase_loss')
+Model = collections.namedtuple("Model",'discrim_loss_transformed,discrim_loss_canonical, gen_loss_GAN, gen_loss_L1, gen_loss')
 
 TestOutput = collections.namedtuple("TestOutput",
                                     "gen_loss_GAN, perceptual_loss, ISTFT_loss, gen_loss_L1, gen_loss, discrim_loss, "
@@ -46,13 +47,14 @@ class Trainer:
             self.experts[i].parameters(), lr=self.opt.lr_G, betas=(0.5, 0.999))for i in range(self.opt.num_experts)]
         self.criterion = nn.BCELoss()
         self.L2loss = torch.nn.MSELoss(reduction='mean')
-
-    def train_step_experts(self, batch, writers):
+        self.L1loss = torch.nn.L1Loss()
+    def standard_scaler(self,x):
+        return torch.div(torch.add(x, 1), 2)
+    def train_step_experts(self, batch, writers, total_step):
         noisy_stft = batch[1].to(self.device_0)
         clean_stft_mag = batch[4].to(self.device_0)
         noisy_stft_mag = batch[5].to(self.device_0)
         noise_type = batch[6]
-        print(noise_type)
 
         # 4) Scores D(E_i(X)) from D for all outputs from the experts (p) :
         exp_scores = []  # [num_experts,batch_size, 1 , 16,16]
@@ -63,18 +65,24 @@ class Trainer:
             exp_output = expert(noisy_stft, noisy_stft_mag)
             exp_outputs.append(exp_output)
             exp_score = self.discriminator_metric(
-                clean_stft_mag, exp_output)  # [batch_size, 1 , 16,16]
+                noisy_stft_mag, exp_output)  # [batch_size, 1 , 16,16]
             exp_scores.append(exp_score)
             # calculate average expert score over all discriminator patches
             exp_score_mean = torch.mean(exp_score, (2, 3))  # [batch_size, 1]
             exp_scores_mean.append(exp_score_mean)
 
         # # Log expert scores
-        # for sample_idx, transf_idx in enumerate(transformation_idx):
+
+        for i in range(self.opt.num_experts):
+            for sample_idx in range(self.opt.batch_size):
+                score = exp_scores_mean[i].squeeze()[sample_idx].item()
+                writers[i].add_scalar(f'D(E(X))__{noise_type[sample_idx]}', score, global_step=total_step)
+
+        #for sample_idx, transf_idx in enumerate(transformation_idx):
         #     for i in range(len(exp_scores)):
         #         score = exp_scores[i].squeeze()[sample_idx].item()
         #         writers[i].add_scalar(
-        #             f'D(E(X))__{transformation_dict[transf_idx]}', score, global_step=total_step)
+         #            f'D(E(X))__{transformation_dict[transf_idx]}', score, global_step=total_step)
 
         # ----------------------------------------------------------------------------------------------------------------
         # 6) Train experts
@@ -84,32 +92,78 @@ class Trainer:
         # Update each expert on samples it won
         for i, expert in enumerate(self.experts):
             winning_indexes = mask_winners.eq(i).nonzero().squeeze(dim=-1)
+
             n_expert_samples = winning_indexes.size(0)
 
             if n_expert_samples > 0:
                 exp_samples = exp_outputs_cat[winning_indexes, i].unsqueeze(
                     dim=1)
+                clean_samples = clean_stft_mag[winning_indexes]
                 D_E_x_transf = exp_scores[i][winning_indexes]
                 # D_E_x_transf_ = discriminator(exp_samples.detach())
 
-                loss_E = self.criterion(
+                gen_loss_GAN = self.criterion(
                     D_E_x_transf, torch.ones_like(D_E_x_transf))
+
                 self.expert_optimizers[i].zero_grad()
+
+                #gen_loss_L1 = torch.mean(torch.abs(clean_samples - exp_samples))
+                gen_loss_L1 = self.L1loss(exp_samples,clean_samples)
+                gen_loss = gen_loss_GAN + gen_loss_L1 * 0.2
+
                 # TODO figure out why retain graph is necessary
                 # loss_E.backward(retain_graph=True)
-                loss_E.backward()
-                self.expert_optimizers[i].step()
-                noisy_references = noisy_stft_mag[winning_indexes]
-                exp_samples_grid = torchvision.utils.make_grid(exp_samples)
+                gen_loss.backward(retain_graph=True)
+
+                noisy_references = self.standard_scaler(noisy_stft_mag[winning_indexes])
+                exp_samples_grid = torchvision.utils.make_grid(self.standard_scaler(exp_samples))
+                clean_samples_grid = torchvision.utils.make_grid(self.standard_scaler(clean_samples))
                 noisy_references_grid = torchvision.utils.make_grid(
                     noisy_references)
                 writers[i].add_scalar(
-                    f'Loss_for_won_samples', loss_E, global_step=total_step)
+                    f'Loss_for_won_samples', gen_loss, global_step=total_step)
                 writers[i].add_image(
                     f'Expert_{i}_won_transformed_samples', exp_samples_grid, global_step=total_step)
                 writers[i].add_image(
                     f'Expert_{i}_won_noise_samples', noisy_references_grid, global_step=total_step)
+                writers[i].add_image(
+                    f'Expert_{i}_won_clean_samples', clean_samples_grid, global_step=total_step)
+        for i in range(self.opt.num_experts):
+            self.expert_optimizers[i].step()
         # ----------------------------------------------------------------------------------------------------------------
+        # 5) Update discriminator:
+        # update gradients with backtransformed data
+        self.optimizer_D_Metric.zero_grad()
+        loss_D_transformed = 0
+
+        for output in exp_outputs:
+            # l = - log(1-x)
+            score = self.discriminator_metric(noisy_stft_mag, output.detach())
+            loss_D_transformed += self.criterion(score,
+                                            torch.zeros_like(score))
+        loss_D_transformed /= self.opt.num_experts
+        loss_D_transformed.backward()
+        # update gradients with canonical data
+        score_canon = self.discriminator_metric(noisy_stft_mag,clean_stft_mag)
+        # l = - log(x)
+        loss_D_canon = self.criterion(
+            score_canon, torch.ones_like(score_canon))
+        loss_D_canon.backward()
+        self.optimizer_D_Metric.step()
+
+        if (total_step+1) % self.opt.log_interval == 0:
+            print(
+                f'Step [{total_step+1}], ')
+            writers[-1].add_scalar(
+                f"Discriminator_loss_average_over_all_experts", loss_D_transformed, global_step=total_step)
+            writers[-1].add_scalar(
+                f"Discriminator_loss_canonical", loss_D_canon, global_step=total_step)
+        #return Model(
+        #    discrim_loss_transformed=torch.mean(loss_D_transformed),
+        #    discrim_loss_canonical=torch.mean(loss_D_canon),
+        #s)
+
+
 
     def train_step(self, batch):
         clean_stft = batch[0].to(self.device_0)
@@ -178,6 +232,8 @@ class Trainer:
         discrim_loss_metric.backward()
         self.optimizer_D_Metric.step()
         # ---------------------
+
+
         ISTFT_loss = torch.tensor([1., -1.])
         val_output = torch.tensor([1., -1.])
         val_target = torch.tensor([1., -1.])
@@ -299,13 +355,14 @@ class Trainer:
             self.optimizer_D_Metric, step_size=self.opt.decay_epoch, gamma=0.5)
 
         # TODO load experts
-        # for i, expert in enumerate(self.experts):
-        #     model_path = f"{self.opt.checkpt_dir}/{self.opt.model_for_init_experts}_E_{i}_init.pt"
-        #     expert.load_state_dict(torch.load(model_path))
+        for i, expert in enumerate(self.experts):
+             model_path = f"{self.opt.checkpt_dir}/{self.opt.model_for_init_experts}_E_{i}_init.pt"
+             expert.load_state_dict(torch.load(model_path))
 
         for epoch in range(self.opt.epochs):
             t0 = time.time()
             epoch += 1
+            epoch_size =  len(self.train_ds)
             # self.generator.train()
 
             for expert in self.experts:
@@ -318,43 +375,47 @@ class Trainer:
             epoch_discrim_loss_metric = 0
             for idx, batch in enumerate(self.train_ds):
                 step = idx + 1
-                model = self.train_step_experts(batch, writers)
-                epoch_gen_loss += model.gen_loss.item()
-                epoch_gen_loss_GAN += model.gen_loss_GAN.item()
-                epoch_discrim_loss += model.discrim_loss.item()
-                epoch_discrim_loss_metric += model.discrim_loss_metric.item()
+                total_step = step + (epoch - 1) * epoch_size
+                model = self.train_step_experts(batch, writers, total_step)
+                #epoch_gen_loss += model.gen_loss.item()
+                #epoch_gen_loss_GAN += model.gen_loss_GAN.item()
+                #epoch_discrim_loss += model.discrim_loss.item()
+                #epoch_discrim_loss_metric += model.discrim_loss_metric.item()
 
                 if (step % self.opt.log_interval) == 0:
-                    template = 'Epoch {}, Step {}, gen_loss: {}, gen_loss_GAN: {}, ISTFT_loss: {}, discrim_loss: {}, ' \
-                               'discrim_loss_metric: {}, perceptual_loss: {}, gen_loss_L1: {}, phase_loss: {}'
-                    logging.info(template.format(epoch, step,
-                                                 model.gen_loss.item(),
-                                                 model.gen_loss_GAN.item(),
-                                                 model.ISTFT_loss.item(),
-                                                 model.discrim_loss.item(),
-                                                 model.discrim_loss_metric.item(),
-                                                 model.perceptual_loss.item(),
-                                                 model.gen_loss_L1.item(),
-                                                 model.phase_loss.item()))
-
+                    #template = 'Epoch {}, Step {}, gen_loss: {}, gen_loss_GAN: {}, ISTFT_loss: {}, discrim_loss: {}, ' \
+                    #           'discrim_loss_metric: {}, perceptual_loss: {}, gen_loss_L1: {}, phase_loss: {}'
+                    #logging.info(template.format(epoch, step)
+                    logging.info(f"Epoch {epoch}, Step{step}, Total Step {total_step}")
             template_2 = 'training time: {} seconds, epoch gen loss: {}, epoch gen loss GAN: {}, ' \
                          'epoch discrim loss: {}, epoch discrmi loss metric: {}'
-            logging.info(template_2.format(
-                time.time() - t0,
-                epoch_gen_loss/step,
-                epoch_gen_loss_GAN/step,
-                epoch_discrim_loss/step,
-                epoch_discrim_loss_metric/step
-            ))
-            if epoch == 1:
-                self.test()
-            if epoch % 3 == 0:
-                self.test()
-            if epoch >= 12 and epoch % 3 == 0:
-                path = self.opt.save_model + '_own_' + str(epoch)
-                torch.save(self.generator.state_dict(), path)
-            scheduler_G.step()
+            #logging.info(template_2.format(
+            #    time.time() - t0,
+            #    epoch_gen_loss/step,
+            #    epoch_gen_loss_GAN/step,
+            #    epoch_discrim_loss/step,
+            #    epoch_discrim_loss_metric/step
+            #))
+            logging.info(f"training time: {time.time() - t0}")
+            #if epoch == 1:
+            #    self.test()
+            #if epoch % 3 == 0:
+            #    self.test()
+            #if epoch >= 12 and epoch % 3 == 0:
+            #    path = self.opt.save_model + '_own_' + str(epoch)
+            #    torch.save(self.generator.state_dict(), path)
+
+
+
+            for i in range(self.opt.num_experts):
+                expert_schedulers[i].step()
             scheduler_D_Metric.step()
+
+        print("Saving models")
+        torch.save(self.discriminator_metric.state_dict(), f"{self.opt.checkpt_dir}/{self.opt.name}_D.pt")
+        for i in range(args.num_experts):
+            torch.save(self.experts[i].state_dict(), f"{self.opt.checkpt_dir}/{self.opt.name}_E_{i}.pt")
+
 
     def initialize_experts(self):
         log_dir_exp = f'{self.opt.log_dir}/{self.opt.name}_init'

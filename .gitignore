@@ -6,3 +6,4 @@ Archive/
 logs*/
 __pycache__/
 .vscode
+checkpoints/

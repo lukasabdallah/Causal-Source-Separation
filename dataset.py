@@ -118,12 +118,12 @@ def load_data(data_dir, csv_file, batch_size, threshold, n_cpu):
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as pltw
     import numpy
     data_dir = 'DEMAND_16KHz'
     csv_file = 'cut16128_ov0.5.csv'
     train_set, test_set = load_data(
-        data_dir, csv_file, 4, -60, 1)
+        data_dir, csv_file, 4, -60, 4)
     for idx, sample in enumerate(test_set):
         # complex_noisy = sample[0]
         # clean_audio = sample[2][0]

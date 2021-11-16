@@ -53,8 +53,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # device = torch.device("cpu")
-    available_gpus = [torch.cuda.get_device_name(
-        i) for i in range(torch.cuda.device_count())]
+    #available_gpus = [torch.cuda.get_device_name(
+     #   i) for i in range(torch.cuda.device_count())]
     train_set, test_set = load_data(opt.data_dir,
                                     opt.csvfile, opt.batch_size, opt.threshold, opt.n_cpu)
     if opt.mode == 'initialize':
