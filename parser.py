@@ -7,7 +7,7 @@ class Parser():
         self.parser.add_argument("--epochs", type=int, default=1,
                                  help="number of epochs of training")
 
-        self.parser.add_argument("--data_dir", type=str, default='DEMAND_16KHz',
+        self.parser.add_argument("--data_dir", type=str, default='/data/private/causal_audio/DEMAND_16KHz',
                                  help="name of the data_dir")
         self.parser.add_argument(
             "--csvfile", default='cut16128_ov0.5.csv', help="csv_file to use")
